@@ -45,8 +45,8 @@ type ZimHeader* = object
 type ZimFile* = object
   filename: string
   header: ZimHeader
-  metadata: Table[string, string]
-  mimetypeList: seq[string]
+  metadata*: Table[string, string]
+  mimetypeList*: seq[string]
   stream: FileStream
 
 proc len*(z: ZimFile): int = z.header.articleCount
@@ -97,20 +97,20 @@ const
   namespaceFulltextIndex* = 'X'
 
 type DirectoryEntry* = object
-  mimetype: ZimMimetype # MIME type number as defined in the MIME type list
+  mimetype*: ZimMimetype # MIME type number as defined in the MIME type list
   parameterLen: byte # (not used) length of extra paramters
-  namespace: char # defines to which namespace this directory entry belongs
-  revision: int32 # (optional) identifies a revision of the contents of this directory entry, needed to identify updates or revisions in the original history
+  namespace*: char # defines to which namespace this directory entry belongs
+  revision*: int32 # (optional) identifies a revision of the contents of this directory entry, needed to identify updates or revisions in the original history
   case kind: DirectoryEntryKind # MIME type number as defined in the MIME type list
   of ArticleEntry:
-    clusterNumber: int32 # cluster number in which the data of this directory entry is stored
-    blobNumber: int32 # blob number inside the compress cluster where the contents are stored
+    clusterNumber*: int32 # cluster number in which the data of this directory entry is stored
+    blobNumber*: int32 # blob number inside the compress cluster where the contents are stored
   of RedirectEntry:
-    redirectIndex: int32 # pointer to the directory entry of the redirect target
+    redirectIndex*: int32 # pointer to the directory entry of the redirect target
   of DeletedEntry, LinkTarget: discard # no extra fields
-  url: string # string with the URL as refered in the URL pointer list
-  title: string # string with an title as refered in the Title pointer list or empty; in case it is empty, the URL is used as title
-  parameter: string # (not used) extra parameters; see `parameterLen`
+  url*: string # string with the URL as refered in the URL pointer list
+  title*: string # string with an title as refered in the Title pointer list or empty; in case it is empty, the URL is used as title
+  parameter*: string # (not used) extra parameters; see `parameterLen`
 
 proc contentType*(z: ZimFile, entry: DirectoryEntry): string =
   if entry.mimetype.int in 0..<z.mimetypeList.len:
