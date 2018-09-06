@@ -1,0 +1,47 @@
+**Webserver**
+---
+* Download a ZIM file from the [Kiwix page](https://download.kiwix.org/zim/)
+* In the following we use `wikipedia_de_all_nopic_2018-05.zim`
+* Compile the http server using [Nim](https://nim-lang.org/install.html):
+  ```
+  nim c -d:release zim.nim
+  ```
+* Change to the directory where the ZIM file exists.
+  You will need the `liblzma` library installed on your system. If you're on Windows, download the file `liblzma.dll` from [here](https://tukaani.org/xz/) and place it in the folder next to the `zim` binary.
+* Run
+  ```
+  zim wikipedia_de_all_nopic_2018-05.zim
+  ```
+* You should see
+  ```
+  Serving ZIM file at http://127.0.0.1:8080/kiwix.wikipedia_de_all/A/Wikipedia:Hauptseite.html
+  Wikipedia
+  aus Wikipedia, der freien Enzyklopädie
+  2018-05-28
+  Press CTRL+C to stop the server.
+  ```
+* You can now visit the page using your webbrowser.
+  Also just http://127.0.0.1:8080 will work and redirect you to the main page.
+
+* If you want to search an article you can put the search word behind `/A/` like http://127.0.0.1:8080/kiwix.wikipedia_de_all/A/Berlin
+
+  You will be redirected to a similiar search result.
+
+**API**
+---
+Nim programmers can import `zim` and get information like title, url or html data 
+from a `ZimFile` object:
+```nim
+import zim
+
+let reader = newZimFileReader("wikipedia_de_all_nopic_2018-05.zim")
+echo reader.getTitle
+echo reader.getDescription
+echo reader.getDate
+
+for entry in reader.entriesSortedByNamespace(namespaceArticles, limit=100):
+  echo entry.kind
+  echo entry.title
+  echo entry.url
+  # let html = reader.readBlob(entry)
+```

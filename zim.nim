@@ -101,7 +101,7 @@ type DirectoryEntry* = object
   parameterLen: byte # (not used) length of extra paramters
   namespace*: char # defines to which namespace this directory entry belongs
   revision*: int32 # (optional) identifies a revision of the contents of this directory entry, needed to identify updates or revisions in the original history
-  case kind: DirectoryEntryKind # MIME type number as defined in the MIME type list
+  case kind*: DirectoryEntryKind # MIME type number as defined in the MIME type list
   of ArticleEntry:
     clusterNumber*: int32 # cluster number in which the data of this directory entry is stored
     blobNumber*: int32 # blob number inside the compress cluster where the contents are stored
@@ -169,27 +169,28 @@ proc followRedirect*(z: ZimFile, entry: DirectoryEntry): DirectoryEntry =
   if likely(entry.isRedirect): z.followRedirect(entry.redirectIndex.int)
   else: entry
 
-iterator entriesSortedByUrl*(z: ZimFile, limit = -1, reverse = false): DirectoryEntry =
+iterator entriesSortedByUrl*(z: ZimFile, reverse = false, limit = -1): DirectoryEntry =
   if reverse:
     let l = if limit > 0 and limit < z.len: z.len-1-limit else: 0
     for x in countdown(z.len-1, l):
-      yield z.readDirectoryEntry(z.urlPointerAtPos(x))
+      yield z.readDirectoryEntry(z.urlPointerAtPos(x), false)
   else:
     let l = if limit > 0: min(limit, z.len-1) else: z.len-1
     for x in countup(0, l):
-      yield z.readDirectoryEntry(z.urlPointerAtPos(x))
+      yield z.readDirectoryEntry(z.urlPointerAtPos(x), false)
 
 iterator entriesSortedByNamespace*(z: ZimFile, namespace: char, limit = -1): DirectoryEntry =
   let reverse = namespace > namespaceArticles
   let cmpToInt = if reverse: -1 else: 1
-  for entry in z.entriesSortedByUrl(limit, reverse):
+  for entry in z.entriesSortedByUrl(reverse, limit):
     if cmp(entry.namespace, namespace) == cmpToInt: break
     if entry.namespace == namespace:
       yield entry
 
-iterator entriesSortedByTitle*(z: ZimFile): DirectoryEntry =
-  for x in 0..<z.len:
-    yield z.readDirectoryEntry(z.titlePointerAtPos(x))
+iterator entriesSortedByTitle*(z: ZimFile, limit = -1): DirectoryEntry =
+  let l = if limit > 0: min(limit, z.len-1) else: z.len-1
+  for x in 0..l:
+    yield z.readDirectoryEntry(z.titlePointerAtPos(x), false)
 
 proc linearSearchImpl(z: ZimFile, namespace: char, candidate: string, searchTitle: static[bool], limit = -1):
     tuple[entry: DirectoryEntry, success: bool] =
@@ -308,6 +309,7 @@ proc readBlobAt*(z: ZimFile, clusterPosition, blobPosition: Natural): string =
   else: raise newException(ValueError, "Unsupported cluster compression: " & $clusterInformation)
 
 proc readBlob*(z: ZimFile, entry: DirectoryEntry): string =
+  assert entry.kind == ArticleEntry
   result = z.readBlobAt(entry.clusterNumber, entry.blobNumber)
 
 proc hasMainPage*(z: ZimFile): bool = z.header.mainPage != noMainPage
