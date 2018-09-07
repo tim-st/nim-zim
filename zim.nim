@@ -133,7 +133,7 @@ proc clusterPointerAtPos(z: ZimFile, pos: Natural): int =
 
 proc readDirectoryEntry*(z: ZimFile, position: int, followRedirects = true): DirectoryEntry =
   z.stream.setPosition(position)
-  doAssert z.stream.readData(addr(result.mimetype), sizeof(ZimMimetype)) == sizeof(ZimMimetype)
+  discard z.stream.readData(addr(result.mimetype), sizeof(ZimMimetype))
   result.parameterLen = z.stream.readUint8
   result.namespace = z.stream.readChar
   result.revision = z.stream.readInt32
