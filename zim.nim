@@ -133,7 +133,7 @@ proc clusterPointerAtPos(z: ZimFile, pos: Natural): int =
 
 proc readDirectoryEntry*(z: ZimFile, position: int, followRedirects = true): DirectoryEntry =
   z.stream.setPosition(position)
-  discard z.stream.readData(addr(result.mimetype), sizeof(ZimMimetype))
+  result.mimetype = z.stream.readUint16
   result.parameterLen = z.stream.readUint8
   result.namespace = z.stream.readChar
   result.revision = z.stream.readInt32
@@ -386,86 +386,85 @@ proc newZimFileReader*(filename: string): ZimFile =
 when isMainModule:
   import asynchttpserver, asyncdispatch, os, uri
 
-  case paramCount()
-  of 1: discard # TODO: support custom port
-  else: raise newException(ValueError, "Usage: zim PathToZimFile")
-  let zimFilename = paramStr(1).strip # https://download.kiwix.org/zim/
-  var reader {.threadvar.}: ZimFile
-  reader = newZimFileReader(zimFilename)
-  var zimName {.threadvar.}: string
-  zimName = reader.getName.decodeUrl
-  var zimNameLen {.threadvar.}: int
-  zimNameLen = zimName.len
-  var urlMainpage {.threadvar.}: string
-  urlMainpage = reader.mainPage.url
+  proc main() = 
+    case paramCount()
+    of 1: discard # TODO: support custom port
+    else: raise newException(ValueError, "Usage: zim PathToZimFile")
+    let zimFilename = paramStr(1).strip # https://download.kiwix.org/zim/
+    var reader = newZimFileReader(zimFilename)
+    var zimName = reader.getName.decodeUrl
+    var zimNameLen = zimName.len
+    var urlMainpage = reader.mainPage.url
 
-  proc redirectTo(req: Request, namespace: char, url: string) {.async.} =
-    let headers = newHttpHeaders(
-      [
-        ("Cache-Control", "max-age=87840, must-revalidate"),
-        ("Location", '/' & zimName & '/' & namespace & '/' & url),
-      ]
-    )
-    await req.respond(Http301, "", headers)
+    proc redirectTo(req: Request, namespace: char, url: string) {.async.} =
+      let headers = newHttpHeaders(
+        [
+          ("Cache-Control", "max-age=87840, must-revalidate"),
+          ("Location", '/' & zimName & '/' & namespace & '/' & url),
+        ]
+      )
+      await req.respond(Http301, "", headers)
 
-  proc redirectToMainpage(req: Request) {.async.} =
-    let headers = newHttpHeaders(
-      [
-        ("Cache-Control", "no-store"),
-        ("Location", '/' & zimName & '/' & namespaceArticles & '/' & urlMainpage),
-      ]
-    )
-    await req.respond(Http301, "", headers)
+    proc redirectToMainpage(req: Request) {.async.} =
+      let headers = newHttpHeaders(
+        [
+          ("Cache-Control", "no-store"),
+          ("Location", '/' & zimName & '/' & namespaceArticles & '/' & urlMainpage),
+        ]
+      )
+      await req.respond(Http301, "", headers)
 
-  proc responseOk(req: Request, entry: DirectoryEntry) {.async.} =
-    let blob = reader.readBlob(entry)
-    let headers = newHttpHeaders(
-      [
-        ("Content-Type", reader.contentType(entry)),
-        ("Cache-Control", "max-age=87840, must-revalidate"),
-        ("Connection", "Close")
-      ]
-    )
-    await req.respond(Http200, blob, headers)
-  
-  var server = newAsyncHttpServer()
-  proc handleRequest(req: Request) {.async.} =
-    let path = req.url.path
-    when not defined(release):
-      echo path
-    var decodedPath: string
-    try: decodedPath = decodeUrl(path) # FIXME: path = "/%"
-    except: decodedPath = path
-    if unlikely(decodedPath == "/favicon.ico"):
-      await req.responseOk(reader.getFavicon)
-    elif unlikely(
-        decodedPath.len < zimNameLen + 5 or
-        not decodedPath.startsWith('/' & zimName & '/') or
-        decodedPath[zimNameLen+3] != '/' or
-        decodedPath[zimNameLen+2] notin {
-          namespaceLayout,
-          namespaceArticles,
-          namespaceImagesFiles
-        }): await req.redirectToMainpage
-    else:
-      let namespace = decodedPath[zimNameLen+2]
-      var url = decodedPath[zimNameLen + 4..^1]
-      let r = reader.readDirectoryEntry(url, namespace)
-      if likely(r.success):
-        await req.responseOk(r.entry)
-      elif namespace != namespaceArticles:
-        await req.redirectToMainpage
+    proc responseOk(req: Request, entry: DirectoryEntry) {.async.} =
+      let blob = reader.readBlob(entry)
+      let headers = newHttpHeaders(
+        [
+          ("Content-Type", reader.contentType(entry)),
+          ("Cache-Control", "max-age=87840, must-revalidate"),
+          ("Connection", "Close")
+        ]
+      )
+      await req.respond(Http200, blob, headers)
+    
+    var server = newAsyncHttpServer(maxBody = 0)
+    proc handleRequest(req: Request) {.async.} =
+      let path = req.url.path
+      when not defined(release):
+        echo path
+      var decodedPath: string
+      try: decodedPath = decodeUrl(path) # FIXME: path = "/%"
+      except: decodedPath = path
+      if unlikely(decodedPath == "/favicon.ico"):
+        await req.responseOk(reader.getFavicon)
+      elif unlikely(
+          decodedPath.len < zimNameLen + 5 or
+          not decodedPath.startsWith('/' & zimName & '/') or
+          decodedPath[zimNameLen+3] != '/' or
+          decodedPath[zimNameLen+2] notin {
+            namespaceLayout,
+            namespaceArticles,
+            namespaceImagesFiles
+          }): await req.redirectToMainpage
       else:
-        # The user looked for an article but the filename was not found:
-        # We search for the best match and redirect because the filename is definetly different
-        # to the filename that was requested.
-        if not url.endsWith(".html"): url = url & ".html" # gives better results
-        let bestMatchResult = reader.readDirectoryEntry(url, namespaceArticles, true)
-        await req.redirectTo(namespace, bestMatchResult.entry.url)
+        let namespace = decodedPath[zimNameLen+2]
+        var url = decodedPath[zimNameLen + 4..^1]
+        let r = reader.readDirectoryEntry(url, namespace)
+        if likely(r.success):
+          await req.responseOk(r.entry)
+        elif namespace != namespaceArticles:
+          await req.redirectToMainpage
+        else:
+          # The user looked for an article but the filename was not found:
+          # We search for the best match and redirect because the filename is definetly different
+          # to the filename that was requested.
+          if not url.endsWith(".html"): url = url & ".html" # gives better results
+          let bestMatchResult = reader.readDirectoryEntry(url, namespaceArticles, true)
+          await req.redirectTo(namespace, bestMatchResult.entry.url)
 
-  echo "Serving ZIM file at http://127.0.0.1:8080" & '/' & zimName & '/' & namespaceArticles & '/' & urlMainpage
-  echo reader.getTitle
-  echo reader.getDescription
-  echo reader.getDate
-  echo "Press CTRL+C to stop the server."
-  waitFor server.serve(Port(8080), handleRequest)
+    echo "Serving ZIM file at http://127.0.0.1:8080" & '/' & zimName & '/' & namespaceArticles & '/' & urlMainpage
+    echo reader.getTitle
+    echo reader.getDescription
+    echo reader.getDate
+    echo "Press CTRL-C to stop the server."
+    waitFor server.serve(Port(8080), handleRequest)
+  
+  main()
