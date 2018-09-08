@@ -259,8 +259,24 @@ proc internalChecksum*(z: ZimFile): MD5Digest =
   z.stream.setPosition(z.header.checksumPos.int)
   doAssert z.stream.readData(addr(result[0]), 16) == 16
 
+proc toMD5(s: Stream, length: Positive, blockSize: static[Positive]): MD5Digest =
+  var
+    context: MD5Context
+    buffer = newString(blockSize)
+  md5Init(context)
+  var i = 0
+  while i < length:
+    let chunkSize = if i + blockSize < length: blockSize else: length - i
+    if unlikely(chunkSize <= 0): break
+    let bytesRead = s.readData(addr(buffer[0]), chunkSize)
+    if unlikely(bytesRead != chunkSize): break
+    md5Update(context, buffer, bytesRead)
+    inc(i, bytesRead)
+  md5Final(context, result)
+
 proc calculatedChecksum*(z: ZimFile): MD5Digest =
-  z.internalChecksum # TODO: implement streamed MD5 checking
+  z.stream.setPosition(0)
+  result = z.stream.toMD5(z.filesize-16, 8192*128)
 
 proc matchesChecksum*(z: ZimFile): bool =
   z.internalChecksum == z.calculatedChecksum
