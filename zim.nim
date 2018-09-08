@@ -460,7 +460,7 @@ when isMainModule:
           let bestMatchResult = reader.readDirectoryEntry(url, namespaceArticles, true)
           await req.redirectTo(namespace, bestMatchResult.entry.url)
 
-    echo "Serving ZIM file at http://127.0.0.1:8080" & '/' & zimName & '/' & namespaceArticles & '/' & urlMainpage
+    echo "Serving ZIM file at http://localhost:8080" & '/' & zimName & '/' & namespaceArticles & '/' & urlMainpage
     echo reader.getTitle
     echo reader.getDescription
     echo reader.getDate
