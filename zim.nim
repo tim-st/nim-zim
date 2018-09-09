@@ -223,7 +223,7 @@ proc binarySearchImpl(z: ZimFile, namespace: char, candidate: string, searchTitl
     if c == 0:
       result.success = true
       break
-    if c == -1: firstUrlPosition = middleUrlPosition + 1
+    if c < 0: firstUrlPosition = middleUrlPosition + 1
     else: lastUrlPosition = middleUrlPosition - 1
 
 proc binarySearchByUrl*(z: ZimFile, url: string, namespace = namespaceArticles):
