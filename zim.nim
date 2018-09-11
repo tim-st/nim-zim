@@ -1,11 +1,16 @@
-import strutils
-import streams
+import asyncdispatch
+import asynchttpserver
+import lzma
 import md5
 import random
-import lzma
+import streams
+import strutils
 import tables
+import uri
 
-# for details see: http://www.openzim.org/wiki/ZIM_file_format
+## This module implements a ZIM file reader and an HTTP server
+## for browsing the ZIM file.
+## For details see: http://www.openzim.org/wiki/ZIM_file_format
 
 const
   magicNumberZimFormat: int32 = 72173914
@@ -181,11 +186,16 @@ iterator entriesSortedByUrl*(z: ZimFile, reverse = false, limit = -1): Directory
 
 iterator entriesSortedByNamespace*(z: ZimFile, namespace: char, limit = -1): DirectoryEntry =
   let reverse = namespace > namespaceArticles
-  let cmpToInt = if reverse: -1 else: 1
-  for entry in z.entriesSortedByUrl(reverse, limit):
-    if cmp(entry.namespace, namespace) == cmpToInt: break
-    if entry.namespace == namespace:
-      yield entry
+  if reverse:
+    for entry in z.entriesSortedByUrl(true, limit):
+      if entry.namespace < namespace: break
+      if entry.namespace == namespace:
+        yield entry
+  else:
+    for entry in z.entriesSortedByUrl(false, limit):
+      if entry.namespace > namespace: break
+      if entry.namespace == namespace:
+        yield entry
 
 iterator entriesSortedByTitle*(z: ZimFile, limit = -1): DirectoryEntry =
   let l = if limit > 0: min(limit, z.len-1) else: z.len-1
@@ -276,10 +286,46 @@ proc toMD5(s: Stream, length: Positive, blockSize: static[Positive]): MD5Digest 
 
 proc calculatedChecksum*(z: ZimFile): MD5Digest =
   z.stream.setPosition(0)
-  result = z.stream.toMD5(z.filesize-16, 8192*128)
+  result = z.stream.toMD5(z.filesize-16, 2 shl 16)
 
 proc matchesChecksum*(z: ZimFile): bool =
   z.internalChecksum == z.calculatedChecksum
+
+template readUncompressedBlob =
+  let thisBlobIndex = thisClusterPointer + 1 + blobPosition * offsetSize
+  var thisBlobPointer: int
+  var nextBlobPointer: int
+  z.stream.setPosition(thisBlobIndex)
+  if likely(offsetSize == 4):
+    thisBlobPointer = z.stream.readInt32.int
+    nextBlobPointer = z.stream.readInt32.int
+  else:
+    thisBlobPointer = z.stream.readInt64.int
+    nextBlobPointer = z.stream.readInt64.int
+  let blobLen = nextBlobPointer - thisBlobPointer
+  z.stream.setPosition(thisClusterPointer + 1 + thisBlobPointer)
+  result = z.stream.readStr(blobLen)
+
+template readLzmaCompressedBlob =
+  var nextClusterPointer: int64
+  if unlikely(clusterPosition == z.header.clusterCount-1):
+    nextClusterPointer = z.header.checksumPos-1
+  else:
+    nextClusterPointer = z.clusterPointerAtPos(clusterPosition+1)
+  let clusterLen = nextClusterPointer - thisClusterPointer - 1
+  z.stream.setPosition(thisClusterPointer+1)
+  var clusterData = lzma.decompress(z.stream.readStr(clusterLen.int))
+  let thisBlobIndex = blobPosition * offsetSize
+  let nextBlobIndex = thisBlobIndex + offsetSize
+  var thisBlobPointer: int
+  var nextBlobPointer: int
+  if likely(offsetSize == 4):
+    thisBlobPointer = int(cast[ptr int32](addr(clusterData[thisBlobIndex]))[])
+    nextBlobPointer = int(cast[ptr int32](addr(clusterData[nextBlobIndex]))[])
+  else:
+    thisBlobPointer = int(cast[ptr int64](addr(clusterData[thisBlobIndex]))[])
+    nextBlobPointer = int(cast[ptr int64](addr(clusterData[nextBlobIndex]))[])
+  result = clusterData[thisBlobPointer..<nextBlobPointer]
 
 proc readBlobAt*(z: ZimFile, clusterPosition, blobPosition: Natural): string =
   let thisClusterPointer = z.clusterPointerAtPos(clusterPosition)
@@ -288,41 +334,12 @@ proc readBlobAt*(z: ZimFile, clusterPosition, blobPosition: Natural): string =
   let isExtended = (clusterInformation and 0b0001_0000) == 0b0001_0000
   let offsetSize = if isExtended: 8 else: 4
   case clusterInformation and 0b0000_1111
-  of 0, 1: # no compression; often used for images and files
-    let thisBlobIndex = thisClusterPointer + 1 + blobPosition * offsetSize
-    var thisBlobPointer: int
-    var nextBlobPointer: int
-    z.stream.setPosition(thisBlobIndex)
-    if likely(offsetSize == 4):
-      thisBlobPointer = z.stream.readInt32.int
-      nextBlobPointer = z.stream.readInt32.int
-    else:
-      thisBlobPointer = z.stream.readInt64.int
-      nextBlobPointer = z.stream.readInt64.int
-    let blobLen = nextBlobPointer - thisBlobPointer
-    z.stream.setPosition(thisClusterPointer + 1 + thisBlobPointer)
-    result = z.stream.readStr(blobLen)
-  of 4: # lzma compressed; often used for html and layout files
-    var nextClusterPointer: int64
-    if unlikely(clusterPosition == z.header.clusterCount-1):
-      nextClusterPointer = z.header.checksumPos-1
-    else:
-      nextClusterPointer = z.clusterPointerAtPos(clusterPosition+1)
-    let clusterLen = nextClusterPointer - thisClusterPointer - 1
-    z.stream.setPosition(thisClusterPointer+1)
-    var clusterData = lzma.decompress(z.stream.readStr(clusterLen.int))
-    let thisBlobIndex = blobPosition * offsetSize
-    let nextBlobIndex = thisBlobIndex + offsetSize
-    var thisBlobPointer: int
-    var nextBlobPointer: int
-    if likely(offsetSize == 4):
-      thisBlobPointer = int(cast[ptr int32](addr(clusterData[thisBlobIndex]))[])
-      nextBlobPointer = int(cast[ptr int32](addr(clusterData[nextBlobIndex]))[])
-    else:
-      thisBlobPointer = int(cast[ptr int64](addr(clusterData[thisBlobIndex]))[])
-      nextBlobPointer = int(cast[ptr int64](addr(clusterData[nextBlobIndex]))[])
-    result = clusterData[thisBlobPointer..<nextBlobPointer]
-  else: raise newException(ValueError, "Unsupported cluster compression: " & $clusterInformation)
+  of 0, 1: readUncompressedBlob()
+  of 4: readLzmaCompressedBlob()
+  else:
+    # Only raise in debug mode. In release mode the empty string is returned.
+    when not defined(release):
+      raise newException(ValueError, "Unsupported cluster compression: " & $clusterInformation)
 
 proc readBlob*(z: ZimFile, entry: DirectoryEntry): string =
   assert entry.kind == ArticleEntry
@@ -383,88 +400,85 @@ proc newZimFileReader*(filename: string): ZimFile =
   result.readMimeTypeList()
   result.readMetadata()
 
-when isMainModule:
-  import asynchttpserver, asyncdispatch, os, uri
-
-  proc main() = 
-    case paramCount()
-    of 1: discard # TODO: support custom port
-    else: raise newException(ValueError, "Usage: zim PathToZimFile")
-    let zimFilename = paramStr(1).strip # https://download.kiwix.org/zim/
-    var reader = newZimFileReader(zimFilename)
-    var zimName = reader.getName.decodeUrl
-    var zimNameLen = zimName.len
-    var urlMainpage = reader.mainPage.url
-
-    proc redirectTo(req: Request, namespace: char, url: string) {.async.} =
-      let headers = newHttpHeaders(
-        [
-          ("Cache-Control", "max-age=87840, must-revalidate"),
-          ("Location", '/' & zimName & '/' & namespace & '/' & url),
-        ]
-      )
-      await req.respond(Http301, "", headers)
-
-    proc redirectToMainpage(req: Request) {.async.} =
-      let headers = newHttpHeaders(
-        [
-          ("Cache-Control", "no-store"),
-          ("Location", '/' & zimName & '/' & namespaceArticles & '/' & urlMainpage),
-        ]
-      )
-      await req.respond(Http301, "", headers)
-
-    proc responseOk(req: Request, entry: DirectoryEntry) {.async.} =
-      let blob = reader.readBlob(entry)
-      let headers = newHttpHeaders(
-        [
-          ("Content-Type", reader.contentType(entry)),
-          ("Cache-Control", "max-age=87840, must-revalidate"),
-          ("Connection", "Close")
-        ]
-      )
-      await req.respond(Http200, blob, headers)
-    
-    var server = newAsyncHttpServer(maxBody = 0)
-    proc handleRequest(req: Request) {.async.} =
-      let path = req.url.path
-      when not defined(release):
-        echo path
-      var decodedPath: string
-      try: decodedPath = decodeUrl(path) # FIXME: path = "/%"
-      except: decodedPath = path
-      if unlikely(decodedPath == "/favicon.ico"):
-        await req.responseOk(reader.getFavicon)
-      elif unlikely(
-          decodedPath.len < zimNameLen + 5 or
-          not decodedPath.startsWith('/' & zimName & '/') or
-          decodedPath[zimNameLen+3] != '/' or
-          decodedPath[zimNameLen+2] notin {
-            namespaceLayout,
-            namespaceArticles,
-            namespaceImagesFiles
-          }): await req.redirectToMainpage
-      else:
-        let namespace = decodedPath[zimNameLen+2]
-        var url = decodedPath[zimNameLen + 4..^1]
-        let r = reader.readDirectoryEntry(url, namespace)
-        if likely(r.success):
-          await req.responseOk(r.entry)
-        elif namespace != namespaceArticles:
-          await req.redirectToMainpage
-        else:
-          # The user looked for an article but the filename was not found:
-          # We search for the best match and redirect because the filename is definetly different
-          # to the filename that was requested.
-          if not url.endsWith(".html"): url = url & ".html" # gives better results
-          let bestMatchResult = reader.readDirectoryEntry(url, namespaceArticles, true)
-          await req.redirectTo(namespace, bestMatchResult.entry.url)
-
-    echo "Serving ZIM file at http://localhost:8080" & '/' & zimName & '/' & namespaceArticles & '/' & urlMainpage
-    echo reader.getTitle
-    echo reader.getDescription
-    echo reader.getDate
-    echo "Press CTRL-C to stop the server."
-    waitFor server.serve(Port(8080), handleRequest)
+proc startZimHttpServer*(filename: string, port: uint16 = 8080) = 
   
-  main()
+  let reader = newZimFileReader(filename)
+  let zimName = decodeUrl(reader.getName)
+  let zimNameLen = zimName.len
+  let urlMainpage = reader.mainPage.url
+
+  proc redirectTo(req: Request, namespace: char, url: string) {.async.} =
+    let headers = newHttpHeaders(
+      [
+        ("Cache-Control", "max-age=87840, must-revalidate"),
+        ("Location", '/' & zimName & '/' & namespace & '/' & url),
+      ]
+    )
+    await req.respond(Http301, "", headers)
+
+  proc redirectToMainpage(req: Request) {.async.} =
+    let headers = newHttpHeaders(
+      [
+        ("Cache-Control", "no-store"),
+        ("Location", '/' & zimName & '/' & namespaceArticles & '/' & urlMainpage),
+      ]
+    )
+    await req.respond(Http301, "", headers)
+
+  proc responseOk(req: Request, entry: DirectoryEntry) {.async.} =
+    let blob = reader.readBlob(entry)
+    let headers = newHttpHeaders(
+      [
+        ("Content-Type", reader.contentType(entry)),
+        ("Cache-Control", "max-age=87840, must-revalidate"),
+        ("Connection", "Close")
+      ]
+    )
+    await req.respond(Http200, blob, headers)
+  
+  proc handleRequest(req: Request) {.async.} =
+    let path = req.url.path
+    when not defined(release):
+      echo path
+    var decodedPath: string
+    try: decodedPath = decodeUrl(path) # FIXME: path = "/%"; colon?
+    except: decodedPath = path
+    if unlikely(decodedPath == "/favicon.ico"):
+      await req.responseOk(reader.getFavicon)
+    elif unlikely(
+        decodedPath.len < zimNameLen + 5 or
+        not decodedPath.startsWith('/' & zimName & '/') or
+        decodedPath[zimNameLen+3] != '/' or
+        decodedPath[zimNameLen+2] notin {
+          namespaceLayout,
+          namespaceArticles,
+          namespaceImagesFiles
+        }): await req.redirectToMainpage
+    else:
+      let namespace = decodedPath[zimNameLen+2]
+      var url = decodedPath[zimNameLen + 4..^1]
+      let r = reader.readDirectoryEntry(url, namespace)
+      if likely(r.success):
+        await req.responseOk(r.entry)
+      elif namespace != namespaceArticles:
+        await req.redirectToMainpage
+      else:
+        # The user looked for an article but the filename was not found:
+        # We search for the best match and redirect because the filename is definetly different
+        # to the filename that was requested.
+        if not url.endsWith(".html"): url = url & ".html" # gives better results
+        let bestMatchResult = reader.readDirectoryEntry(url, namespaceArticles, true)
+        await req.redirectTo(namespace, bestMatchResult.entry.url)
+
+  echo "Serving ZIM file at http://localhost:" & $port & '/' & zimName & '/' & namespaceArticles & '/' & urlMainpage
+  echo reader.getTitle
+  echo reader.getDescription
+  echo reader.getDate
+  echo "Press CTRL-C to stop the server."
+  let server = newAsyncHttpServer(maxBody = 0)
+  waitFor server.serve(Port(port), handleRequest)
+
+when isMainModule:
+  import cligen
+
+  dispatch(startZimHttpServer)

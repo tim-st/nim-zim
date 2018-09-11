@@ -1,3 +1,9 @@
+**Dependencies**
+---
+`nimble install cligen@#head`
+
+And `liblzma` (see below).
+
 **Webserver**
 ---
 * Download a ZIM file from the [Kiwix page](https://download.kiwix.org/zim/)
@@ -8,22 +14,22 @@
   ```
 * Change to the directory where the ZIM file exists.
   You will need the `liblzma` library installed on your system. If you're on Windows, download the file `liblzma.dll` from [here](https://tukaani.org/xz/) and place it in the folder next to the `zim` binary.
-* Run
+* Start the server (setting the port is optional and defaults to 8080)
   ```
-  zim wikipedia_de_all_nopic_2018-05.zim
+  zim --filename=wikipedia_de_all_nopic_2018-05.zim --port=8081
   ```
 * You should see
   ```
-  Serving ZIM file at http://127.0.0.1:8080/kiwix.wikipedia_de_all/A/Wikipedia:Hauptseite.html
+  Serving ZIM file at http://127.0.0.1:8081/kiwix.wikipedia_de_all/A/Wikipedia:Hauptseite.html
   Wikipedia
   aus Wikipedia, der freien Enzyklopädie
   2018-05-28
-  Press CTRL+C to stop the server.
+  Press CTRL-C to stop the server.
   ```
 * You can now visit the page using your webbrowser.
-  Also just http://127.0.0.1:8080 will work and redirect you to the main page.
+  Also just http://127.0.0.1:8081 will work and redirect you to the main page.
 
-* If you want to search an article you can put the search word behind `/A/` like http://127.0.0.1:8080/kiwix.wikipedia_de_all/A/Berlin
+* If you want to search an article you can put the search word behind `/A/` like http://127.0.0.1:8081/kiwix.wikipedia_de_all/A/Berlin
 
   You will be redirected to a similiar search result.
 
