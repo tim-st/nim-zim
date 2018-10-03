@@ -1,6 +1,6 @@
 import asyncdispatch
 import asynchttpserver
-import lzma
+import lzma/lzma
 import md5
 import random
 import streams
