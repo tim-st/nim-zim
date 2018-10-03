@@ -483,5 +483,5 @@ when isMainModule:
 
   # TODO: add more commands
   dispatchMulti(
-    [startZimHttpServer, cmdName="server"]
+    [startZimHttpServer, cmdname="server"]
   )
