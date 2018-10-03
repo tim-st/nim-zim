@@ -1,6 +1,6 @@
 import asyncdispatch
 import asynchttpserver
-import lzma
+import lzma/lzma
 import md5
 import random
 import streams
@@ -441,7 +441,7 @@ proc startZimHttpServer*(filename: string, port: uint16 = 8080) =
     when not defined(release):
       echo path
     var decodedPath: string
-    try: decodedPath = decodeUrl(path) # FIXME: path = "/%"; colon?
+    try: decodedPath = decodeUrl(path) # FIXME: path = "/%"
     except: decodedPath = path
     if unlikely(decodedPath == "/favicon.ico"):
       await req.responseOk(reader.getFavicon)
@@ -481,4 +481,7 @@ proc startZimHttpServer*(filename: string, port: uint16 = 8080) =
 when isMainModule:
   import cligen
 
-  dispatch(startZimHttpServer)
+  # TODO: add more commands
+  dispatchMulti(
+    [startZimHttpServer, cmdname="server"]
+  )
