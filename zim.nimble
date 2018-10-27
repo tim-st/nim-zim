@@ -10,4 +10,4 @@ srcDir        = "src"
 
 requires "nim >= 0.19.0"
 requires "cligen >= 0.9.16"
-requires "https://github.com/tim-st/nim-lzma@#test-nimble-version"
+requires "https://github.com/tim-st/nim-lzma#test-nimble-version"
