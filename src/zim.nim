@@ -1,12 +1,13 @@
 import asyncdispatch
 import asynchttpserver
-import zim/lzma
 import md5
 import random
 import streams
+import strformat
 import strutils
 import tables
 import uri
+import zim/lzma
 
 ## This module implements a ZIM file reader and an HTTP server
 ## for browsing the ZIM file.
@@ -339,7 +340,7 @@ proc readBlobAt*(z: ZimFile, clusterPosition, blobPosition: Natural): string =
   else:
     # Only raise in debug mode. In release mode the empty string is returned.
     when not defined(release):
-      raise newException(ValueError, "Unsupported cluster compression: " & $clusterInformation)
+      raise newException(ValueError, fmt"Unsupported cluster compression: {clusterInformation and 0b0000_1111}")
 
 proc readBlob*(z: ZimFile, entry: DirectoryEntry): string =
   assert entry.kind == ArticleEntry
@@ -402,46 +403,40 @@ proc newZimFileReader*(filename: string): ZimFile =
 
 proc startZimHttpServer*(filename: string, port: uint16 = 8080) = 
   
+  const maxAge = 87840
   let reader = newZimFileReader(filename)
   let zimName = decodeUrl(reader.getName)
   let zimNameLen = zimName.len
   let urlMainpage = reader.mainPage.url
 
   proc redirectTo(req: Request, namespace: char, url: string) {.async.} =
-    let headers = newHttpHeaders(
-      [
-        ("Cache-Control", "max-age=87840, must-revalidate"),
-        ("Location", '/' & zimName & '/' & namespace & '/' & url),
-      ]
-    )
+    let headers = newHttpHeaders({
+      "Cache-Control": fmt"max-age={maxAge}, must-revalidate",
+      "Location": fmt"/{zimName}/{namespace}/{url}"
+    })
     await req.respond(Http301, "", headers)
 
   proc redirectToMainpage(req: Request) {.async.} =
-    let headers = newHttpHeaders(
-      [
-        ("Cache-Control", "no-store"),
-        ("Location", '/' & zimName & '/' & namespaceArticles & '/' & urlMainpage),
-      ]
-    )
+    let headers = newHttpHeaders({
+      "Cache-Control": "no-store",
+      "Location": fmt"/{zimName}/{namespaceArticles}/{urlMainpage}"
+    })
     await req.respond(Http301, "", headers)
 
   proc responseOk(req: Request, entry: DirectoryEntry) {.async.} =
-    let blob = reader.readBlob(entry)
-    let headers = newHttpHeaders(
-      [
-        ("Content-Type", reader.contentType(entry)),
-        ("Cache-Control", "max-age=87840, must-revalidate"),
-        ("Connection", "Close")
-      ]
-    )
-    await req.respond(Http200, blob, headers)
+    let headers = newHttpHeaders({
+      "Content-Type": reader.contentType(entry),
+      "Cache-Control": fmt"max-age={maxAge}, must-revalidate",
+      "Connection": "Close"
+    })
+    await req.respond(Http200, reader.readBlob(entry), headers)
   
   proc handleRequest(req: Request) {.async.} =
     let path = req.url.path
     when not defined(release):
       echo path
     var decodedPath: string
-    try: decodedPath = decodeUrl(path) # FIXME: path = "/%"
+    try: decodedPath = decodeUrl(path)
     except: decodedPath = path
     if unlikely(decodedPath == "/favicon.ico"):
       await req.responseOk(reader.getFavicon)
@@ -470,7 +465,7 @@ proc startZimHttpServer*(filename: string, port: uint16 = 8080) =
         let bestMatchResult = reader.readDirectoryEntry(url, namespaceArticles, true)
         await req.redirectTo(namespace, bestMatchResult.entry.url)
 
-  echo "Serving ZIM file at http://localhost:" & $port & '/' & zimName & '/' & namespaceArticles & '/' & urlMainpage
+  echo fmt"Serving ZIM file at http://localhost:{port}/{zimName}/{namespaceArticles}/{urlMainpage}"
   echo reader.getTitle
   echo reader.getDescription
   echo reader.getDate
@@ -481,7 +476,6 @@ proc startZimHttpServer*(filename: string, port: uint16 = 8080) =
 when isMainModule:
   import cligen
 
-  # TODO: add more commands
   dispatchMulti(
     [startZimHttpServer, cmdname="server"]
   )
