@@ -476,6 +476,48 @@ proc startZimHttpServer*(filename: string, port: uint16 = 8080) =
 when isMainModule:
   import cligen
 
+  proc checksum(filename: string) =
+    let reader = newZimFileReader(filename)
+    let zimName = decodeUrl(reader.getName)
+    echo fmt"Calculating MD5 checksum for `{zimName}`. Please wait."
+    let internal = reader.internalChecksum
+    let calculated = reader.calculatedChecksum
+    echo fmt"Internal checksum was: {internal}"
+    echo fmt"Calculated checksum was: {calculated}"
+
+  proc metadata(filename: string) =
+    let reader = newZimFileReader(filename)
+    echo reader.metadata
+
+  proc printArticle(filename: string, articleName: string) =
+    let reader = newZimFileReader(filename)
+    let bestMatchResult = reader.readDirectoryEntry(articleName, namespaceArticles, true)
+    echo reader.readBlob(bestMatchResult.entry)
+
+  proc randomArticle(filename: string) =
+    let reader = newZimFileReader(filename)
+    let randomResult = reader.randomArticleEntry()
+    echo reader.readBlob(randomResult)
+
+  proc mimetypes(filename: string) =
+    let reader = newZimFileReader(filename)
+    echo reader.mimetypeList
+
+  proc debug(filename: string) =
+    let reader = newZimFileReader(filename)
+    echo fmt"""filename: {filename}
+filesize: {reader.filesize}
+internalChecksum: {reader.internalChecksum}
+header: {reader.header}
+metadata: {reader.metadata}"""
+
+
   dispatchMulti(
-    [startZimHttpServer, cmdname="server"]
+    [startZimHttpServer, cmdname="server"],
+    [checksum],
+    [metadata],
+    [printArticle],
+    [randomArticle, cmdname="random"],
+    [mimetypes],
+    [debug]
   )
