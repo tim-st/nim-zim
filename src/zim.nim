@@ -315,18 +315,22 @@ template readLzmaCompressedBlob =
     nextClusterPointer = z.clusterPointerAtPos(clusterPosition+1)
   let clusterLen = nextClusterPointer - thisClusterPointer - 1
   z.stream.setPosition(thisClusterPointer+1)
-  var clusterData = lzma.decompress(z.stream.readStr(clusterLen.int))
-  let thisBlobIndex = blobPosition * offsetSize
-  let nextBlobIndex = thisBlobIndex + offsetSize
-  var thisBlobPointer: int
-  var nextBlobPointer: int
-  if likely(offsetSize == 4):
-    thisBlobPointer = int(cast[ptr int32](addr(clusterData[thisBlobIndex]))[])
-    nextBlobPointer = int(cast[ptr int32](addr(clusterData[nextBlobIndex]))[])
-  else:
-    thisBlobPointer = int(cast[ptr int64](addr(clusterData[thisBlobIndex]))[])
-    nextBlobPointer = int(cast[ptr int64](addr(clusterData[nextBlobIndex]))[])
-  result = clusterData[thisBlobPointer..<nextBlobPointer]
+  try:
+    var clusterData = lzma.decompress(z.stream.readStr(clusterLen.int))
+    let thisBlobIndex = blobPosition * offsetSize
+    let nextBlobIndex = thisBlobIndex + offsetSize
+    var thisBlobPointer: int
+    var nextBlobPointer: int
+    if likely(offsetSize == 4):
+      thisBlobPointer = int(cast[ptr int32](addr(clusterData[thisBlobIndex]))[])
+      nextBlobPointer = int(cast[ptr int32](addr(clusterData[nextBlobIndex]))[])
+    else:
+      thisBlobPointer = int(cast[ptr int64](addr(clusterData[thisBlobIndex]))[])
+      nextBlobPointer = int(cast[ptr int64](addr(clusterData[nextBlobIndex]))[])
+    result = clusterData[thisBlobPointer..<nextBlobPointer]
+  except LzmaError:
+    echo "Decompressing clusterData of length ", clusterLen, " failed at position ", thisClusterPointer.int+1, "."
+    echo getCurrentExceptionMsg()
 
 proc readBlobAt*(z: ZimFile, clusterPosition, blobPosition: Natural): string =
   let thisClusterPointer = z.clusterPointerAtPos(clusterPosition)
@@ -379,7 +383,10 @@ proc getFavicon*(z: ZimFile): DirectoryEntry =
 
 proc getMetadata*(z: ZimFile, key: string): string = z.metadata.getOrDefault(key)
 
-proc getName*(z: ZimFile): string = z.getMetadata("Name")
+proc getName*(z: ZimFile): string = 
+  result = z.getMetadata("Name").strip
+  if result.len == 0: result = $z.uuid
+
 proc getTitle*(z: ZimFile): string = z.getMetadata("Title")
 proc getCreator*(z: ZimFile): string = z.getMetadata("Creator")
 proc getPublisher*(z: ZimFile): string = z.getMetadata("Publisher")
