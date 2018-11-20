@@ -231,9 +231,9 @@ proc binarySearchImpl(z: ZimFile, namespace: char, candidate: string, searchTitl
     var c = cmp(result.entry.namespace, namespace)
     if c == 0:
       c = cmp(when searchTitle: result.entry.title else: result.entry.url, candidate)
-    if c == 0:
-      result.success = true
-      break
+      if c == 0:
+        result.success = true
+        break
     if c < 0: firstUrlPosition = middleUrlPosition + 1
     else: lastUrlPosition = middleUrlPosition - 1
 
@@ -329,8 +329,9 @@ template readLzmaCompressedBlob =
       nextBlobPointer = int(cast[ptr int64](addr(clusterData[nextBlobIndex]))[])
     result = clusterData[thisBlobPointer..<nextBlobPointer]
   except LzmaError:
-    echo "Decompressing clusterData of length ", clusterLen, " failed at position ", thisClusterPointer.int+1, "."
-    echo getCurrentExceptionMsg()
+    when not defined(release):
+      echo "Decompressing clusterData of length ", clusterLen, " failed at position ", thisClusterPointer.int+1, "."
+      echo getCurrentExceptionMsg()
 
 proc readBlobAt*(z: ZimFile, clusterPosition, blobPosition: Natural): string =
   let thisClusterPointer = z.clusterPointerAtPos(clusterPosition)
