@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.1.3"
+version       = "0.2.0"
 author        = "tim-st"
 description   = "Reader for ZIM files written in Nim"
 license       = "MIT"

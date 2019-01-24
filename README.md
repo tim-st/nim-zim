@@ -41,14 +41,16 @@ from a `ZimFile` object:
 ```nim
 import zim
 
-let reader = newZimFileReader("wikipedia_de_all_nopic_2018-05.zim")
-echo reader.getTitle
-echo reader.getDescription
-echo reader.getDate
+let zf = openZimFile("wikipedia_de_all_nopic_2018-05.zim")
+echo zf.getTitle
+echo zf.getDescription
+echo zf.getDate
 
-for entry in reader.entriesSortedByNamespace(namespaceArticles, limit=100):
+for entry in zf.entriesSortedByNamespace(namespaceArticles, limit=100):
   echo entry.kind
   echo entry.title
   echo entry.url
-  # let html = reader.readBlob(entry)
+  # let html = zf.readBlob(entry)
+
+zf.close()
 ```

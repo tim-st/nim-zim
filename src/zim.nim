@@ -13,10 +13,13 @@ import zim/lzma
 ## for browsing the ZIM file.
 ## For details see: http://www.openzim.org/wiki/ZIM_file_format
 
+# FIXME: increase `limit` to the number of real entries,
+# where `limit` is used as parameter. 
+
 const
-  magicNumberZimFormat: int32 = 72173914
-  noMainPage: int32 = int32.high
-  noLayoutPage: int32 = int32.high
+  magicNumberZimFormat = 72173914u32
+  noMainPage = uint32.high
+  noLayoutPage = noMainPage
 
 type ZimUuid* = array[16, uint8]
 
@@ -34,19 +37,19 @@ const
   RedirectEntryValue: ZimMimetype = 0xFFFF
 
 type ZimHeader* = object
-  magicNumber: int32 # Magic number to recognise the file format, must be 72173914
-  majorVersion: int16 # Major version of the ZIM file format (5 or 6)
-  minorVersion: int16 # Minor version of the ZIM file format
+  magicNumber: uint32 # Magic number to recognise the file format, must be 72173914
+  majorVersion: uint16 # Major version of the ZIM file format (5 or 6)
+  minorVersion: uint16 # Minor version of the ZIM file format
   uuid: ZimUuid # unique id of this zim file
-  articleCount: int32 # total number of articles
-  clusterCount: int32 # total number of clusters
-  urlPtrPos: int64 # position of the directory pointerlist ordered by URL
-  titlePtrPos: int64 # position of the directory pointerlist ordered by Title
-  clusterPtrPos: int64 # position of the cluster pointer list
-  mimeListPos: int64 # position of the MIME type list (also header size)
-  mainPage: int32 # main page or 0xffffffff if no main page
-  layoutPage: int32 # layout page or 0xffffffff if no layout page
-  checksumPos: int64 # pointer to the md5checksum of this file without the checksum itself. This points always 16 bytes before the end of the file.
+  articleCount: uint32 # total number of articles
+  clusterCount: uint32 # total number of clusters
+  urlPtrPos: uint64 # position of the directory pointerlist ordered by URL
+  titlePtrPos: uint64 # position of the directory pointerlist ordered by Title
+  clusterPtrPos: uint64 # position of the cluster pointer list
+  mimeListPos: uint64 # position of the MIME type list (also header size)
+  mainPage: uint32 # main page or 0xffffffff if no main page
+  layoutPage: uint32 # layout page or 0xffffffff if no layout page
+  checksumPos: uint64 # pointer to the md5checksum of this file without the checksum itself. This points always 16 bytes before the end of the file.
 
 type ZimFile* = object
   filename: string
@@ -55,28 +58,29 @@ type ZimFile* = object
   mimetypeList*: seq[string]
   stream: FileStream
 
-proc len*(z: ZimFile): int = z.header.articleCount
+proc len*(z: ZimFile): int = z.header.articleCount.int
 proc filesize*(z: ZimFile): int = z.header.checksumPos.int + 16
 proc uuid*(z: ZimFile): ZimUuid = z.header.uuid
 proc close*(z: ZimFile) = z.stream.close()
 
 proc readHeader(z: var ZimFile) =
   z.stream.setPosition(0)
-  z.header.magicNumber = z.stream.readInt32
-  z.header.majorVersion = z.stream.readInt16
-  z.header.minorVersion = z.stream.readInt16
+  z.header.magicNumber = z.stream.readUint32
+  doAssert z.header.magicNumber == magicNumberZimFormat
+  z.header.majorVersion = z.stream.readUint16
+  z.header.minorVersion = z.stream.readUint16
   doAssert z.stream.readData(addr(z.header.uuid[0]), sizeof(ZimUuid)) == sizeof(ZimUuid)
-  z.header.articleCount = z.stream.readInt32
-  z.header.clusterCount = z.stream.readInt32
-  z.header.urlPtrPos = z.stream.readInt64
-  z.header.titlePtrPos = z.stream.readInt64
-  z.header.clusterPtrPos = z.stream.readInt64
-  z.header.mimeListPos = z.stream.readInt64
-  z.header.mainPage = z.stream.readInt32
-  z.header.layoutPage = z.stream.readInt32
-  z.header.checksumPos = z.stream.readInt64
+  z.header.articleCount = z.stream.readUint32
+  z.header.clusterCount = z.stream.readUint32
+  z.header.urlPtrPos = z.stream.readUint64
+  z.header.titlePtrPos = z.stream.readUint64
+  z.header.clusterPtrPos = z.stream.readUint64
+  z.header.mimeListPos = z.stream.readUint64
+  z.header.mainPage = z.stream.readUint32
+  z.header.layoutPage = z.stream.readUint32
+  z.header.checksumPos = z.stream.readUint64
 
-proc readZeroTerminated(s: Stream): string =
+proc readNullTerminated(s: Stream): string =
   while true:
     let c = s.readChar
     if c == '\0': break
@@ -86,7 +90,7 @@ proc readMimeTypeList(z: var ZimFile) =
   z.mimetypeList = newSeqOfCap[string](32)
   z.stream.setPosition(z.header.mimeListPos.int)
   while true:
-    let mimetype = z.stream.readZeroTerminated()
+    let mimetype = z.stream.readNullTerminated()
     if mimetype.len == 0: break
     z.mimetypeList.add(mimeType.toLowerAscii.strip)
 
@@ -106,13 +110,13 @@ type DirectoryEntry* = object
   mimetype*: ZimMimetype # MIME type number as defined in the MIME type list
   parameterLen: byte # (not used) length of extra paramters
   namespace*: char # defines to which namespace this directory entry belongs
-  revision*: int32 # (optional) identifies a revision of the contents of this directory entry, needed to identify updates or revisions in the original history
+  revision*: uint32 # (optional) identifies a revision of the contents of this directory entry, needed to identify updates or revisions in the original history
   case kind*: DirectoryEntryKind # MIME type number as defined in the MIME type list
   of ArticleEntry:
-    clusterNumber*: int32 # cluster number in which the data of this directory entry is stored
-    blobNumber*: int32 # blob number inside the compress cluster where the contents are stored
+    clusterNumber*: uint32 # cluster number in which the data of this directory entry is stored
+    blobNumber*: uint32 # blob number inside the compress cluster where the contents are stored
   of RedirectEntry:
-    redirectIndex*: int32 # pointer to the directory entry of the redirect target
+    redirectIndex*: uint32 # pointer to the directory entry of the redirect target
   of DeletedEntry, LinkTarget: discard # no extra fields
   url*: string # string with the URL as refered in the URL pointer list
   title*: string # string with an title as refered in the Title pointer list or empty; in case it is empty, the URL is used as title
@@ -125,24 +129,24 @@ proc contentType*(z: ZimFile, entry: DirectoryEntry): string =
 proc isHtmlDocument*(z: ZimFile, entry: DirectoryEntry): bool =
   z.contentType(entry) == "text/html"
 
-proc urlPointerAtPos(z: ZimFile, pos: Natural): int =
+proc urlPointerAtPos(z: ZimFile, pos: Natural): uint64 =
   z.stream.setPosition(z.header.urlPtrPos.int+pos*8)
-  result = z.stream.readInt64.int
+  result = z.stream.readUint64
 
-proc titlePointerAtPos(z: ZimFile, pos: Natural): int =
+proc titlePointerAtPos(z: ZimFile, pos: Natural): uint64 =
   z.stream.setPosition(z.header.titlePtrPos.int+pos*4)
-  result = z.urlPointerAtPos(z.stream.readInt32.int)
+  result = z.urlPointerAtPos(z.stream.readUint32)
 
-proc clusterPointerAtPos(z: ZimFile, pos: Natural): int =
+proc clusterPointerAtPos(z: ZimFile, pos: Natural): uint64 =
   z.stream.setPosition(z.header.clusterPtrPos.int+pos*8)
-  result = z.stream.readInt64.int
+  result = z.stream.readUint64
 
-proc readDirectoryEntry*(z: ZimFile, position: int, followRedirects = true): DirectoryEntry =
-  z.stream.setPosition(position)
+proc readDirectoryEntry*(z: ZimFile, position: uint64, followRedirects = true): DirectoryEntry =
+  z.stream.setPosition(position.int)
   result.mimetype = z.stream.readUint16
   result.parameterLen = z.stream.readUint8
   result.namespace = z.stream.readChar
-  result.revision = z.stream.readInt32
+  result.revision = z.stream.readUint32
   case result.mimetype
   of DeletedEntryValue:
     result.kind = DeletedEntry
@@ -150,15 +154,15 @@ proc readDirectoryEntry*(z: ZimFile, position: int, followRedirects = true): Dir
     result.kind = LinkTarget
   of RedirectEntryValue:
     result.kind = RedirectEntry
-    result.redirectIndex = z.stream.readInt32
+    result.redirectIndex = z.stream.readUint32
     if followRedirects:
       return z.readDirectoryEntry(z.urlPointerAtPos(result.redirectIndex), true)
   else:
     result.kind = ArticleEntry
-    result.clusterNumber = z.stream.readInt32
-    result.blobNumber = z.stream.readInt32
-  result.url = z.stream.readZeroTerminated
-  result.title = z.stream.readZeroTerminated
+    result.clusterNumber = z.stream.readUint32
+    result.blobNumber = z.stream.readUint32
+  result.url = z.stream.readNullTerminated
+  result.title = z.stream.readNullTerminated
   if unlikely(result.parameterLen.int > 0):
     result.parameter = z.stream.readStr(result.parameterLen.int)
 
@@ -205,7 +209,7 @@ iterator entriesSortedByTitle*(z: ZimFile, limit = -1): DirectoryEntry =
 
 proc linearSearchImpl(z: ZimFile, namespace: char, candidate: string, searchTitle: static[bool], limit = -1):
     tuple[entry: DirectoryEntry, success: bool] =
-  ## Runtime: O(n)
+  # Runtime: O(n)
   for entry in z.entriesSortedByNamespace(namespace, limit):
     result.entry = entry
     if (when searchTitle: result.entry.title else: result.entry.url) == candidate:
@@ -222,7 +226,7 @@ proc linearSearchByTitle*(z: ZimFile, title: string, namespace = namespaceArticl
 
 proc binarySearchImpl(z: ZimFile, namespace: char, candidate: string, searchTitle: static[bool]):
     tuple[entry: DirectoryEntry, success: bool] =
-  ## Runtime: O(log_2(n))
+  # Runtime: O(log_2(n))
   var firstUrlPosition = 0
   var lastUrlPosition = z.len - 1
   while firstUrlPosition <= lastUrlPosition:
@@ -287,65 +291,60 @@ proc toMD5(s: Stream, length: Positive, blockSize: static[Positive]): MD5Digest 
 
 proc calculatedChecksum*(z: ZimFile): MD5Digest =
   z.stream.setPosition(0)
-  result = z.stream.toMD5(z.filesize-16, 2 shl 16)
+  result = z.stream.toMD5(z.filesize-16, 2 shl 20)
 
 proc matchesChecksum*(z: ZimFile): bool =
   z.internalChecksum == z.calculatedChecksum
 
-template readUncompressedBlob =
-  let thisBlobIndex = thisClusterPointer + 1 + blobPosition * offsetSize
-  var thisBlobPointer: int
-  var nextBlobPointer: int
-  z.stream.setPosition(thisBlobIndex)
-  if likely(offsetSize == 4):
-    thisBlobPointer = z.stream.readInt32.int
-    nextBlobPointer = z.stream.readInt32.int
-  else:
-    thisBlobPointer = z.stream.readInt64.int
-    nextBlobPointer = z.stream.readInt64.int
-  let blobLen = nextBlobPointer - thisBlobPointer
-  z.stream.setPosition(thisClusterPointer + 1 + thisBlobPointer)
-  result = z.stream.readStr(blobLen)
-
-template readLzmaCompressedBlob =
-  var nextClusterPointer: int64
-  if unlikely(clusterPosition == z.header.clusterCount-1):
-    nextClusterPointer = z.header.checksumPos-1
-  else:
-    nextClusterPointer = z.clusterPointerAtPos(clusterPosition+1)
-  let clusterLen = nextClusterPointer - thisClusterPointer - 1
-  z.stream.setPosition(thisClusterPointer+1)
-  try:
-    var clusterData = lzma.decompress(z.stream.readStr(clusterLen.int))
-    let thisBlobIndex = blobPosition * offsetSize
-    let nextBlobIndex = thisBlobIndex + offsetSize
-    var thisBlobPointer: int
-    var nextBlobPointer: int
-    if likely(offsetSize == 4):
-      thisBlobPointer = int(cast[ptr int32](addr(clusterData[thisBlobIndex]))[])
-      nextBlobPointer = int(cast[ptr int32](addr(clusterData[nextBlobIndex]))[])
-    else:
-      thisBlobPointer = int(cast[ptr int64](addr(clusterData[thisBlobIndex]))[])
-      nextBlobPointer = int(cast[ptr int64](addr(clusterData[nextBlobIndex]))[])
-    result = clusterData[thisBlobPointer..<nextBlobPointer]
-  except LzmaError:
-    when not defined(release):
-      echo "Decompressing clusterData of length ", clusterLen, " failed at position ", thisClusterPointer.int+1, "."
-      echo getCurrentExceptionMsg()
-
 proc readBlobAt*(z: ZimFile, clusterPosition, blobPosition: Natural): string =
+  # TODO: support cluster caching?
   let thisClusterPointer = z.clusterPointerAtPos(clusterPosition)
   z.stream.setPosition(thisClusterPointer.int)
   let clusterInformation = z.stream.readUint8
   let isExtended = (clusterInformation and 0b0001_0000) == 0b0001_0000
   let offsetSize = if isExtended: 8 else: 4
-  case clusterInformation and 0b0000_1111
-  of 0, 1: readUncompressedBlob()
-  of 4: readLzmaCompressedBlob()
+  let clusterCompression = clusterInformation and 0b0000_1111 
+  case clusterCompression
+  of 0, 1:
+    let thisBlobIndex = thisClusterPointer.int + 1 + blobPosition * offsetSize
+    z.stream.setPosition(thisBlobIndex)
+    let (thisBlobPointer, nextBlobPointer) = if likely(offsetSize == 4):
+      (z.stream.readUint32.int, z.stream.readUint32.int)
+    else:
+      (z.stream.readUint64.int, z.stream.readUint64.int)
+    let blobLen = nextBlobPointer - thisBlobPointer
+    z.stream.setPosition(thisClusterPointer.int + 1 + thisBlobPointer)
+    result = z.stream.readStr(blobLen)
+  of 4:
+    let nextClusterPointer = if unlikely(clusterPosition == z.header.clusterCount.int-1):
+      z.header.checksumPos-1
+    else:
+      z.clusterPointerAtPos(clusterPosition+1)
+    let clusterLen = nextClusterPointer - thisClusterPointer - 1
+    z.stream.setPosition(thisClusterPointer.int+1)
+    try:
+      var clusterData = lzma.decompress(z.stream.readStr(clusterLen.int))
+      let thisBlobIndex = blobPosition * offsetSize
+      let nextBlobIndex = thisBlobIndex + offsetSize
+      let (thisBlobPointer, nextBlobPointer) = if likely(offsetSize == 4):
+        (
+          int(cast[ptr uint32](addr(clusterData[thisBlobIndex]))[]),
+          int(cast[ptr uint32](addr(clusterData[nextBlobIndex]))[])
+        )
+      else:
+        (
+          int(cast[ptr uint64](addr(clusterData[thisBlobIndex]))[]),
+          int(cast[ptr uint64](addr(clusterData[nextBlobIndex]))[])
+        )
+      result = clusterData[thisBlobPointer..<nextBlobPointer]
+    except:
+      when not defined(release):
+        echo fmt"Decompressing clusterData of length {clusterLen} failed at position {thisClusterPointer.int+1}."
+        echo getCurrentExceptionMsg()
   else:
-    # Only raise in debug mode. In release mode the empty string is returned.
+    # Return empty string
     when not defined(release):
-      raise newException(ValueError, fmt"Unsupported cluster compression: {clusterInformation and 0b0000_1111}")
+      echo fmt"Unsupported cluster compression: {clusterCompression}"
 
 proc readBlob*(z: ZimFile, entry: DirectoryEntry): string =
   assert entry.kind == ArticleEntry
@@ -358,7 +357,7 @@ proc mainPage*(z: ZimFile): DirectoryEntry
 proc randomArticleEntry*(z: ZimFile): DirectoryEntry =
   randomize()
   var tries = 0
-  while tries != 10:
+  while tries < 20:
     let randomPosition = rand(z.len-1)
     result = z.readDirectoryEntry(z.urlPointerAtPos(randomPosition))
     if result.isArticle and result.title.len > 0: return
@@ -401,21 +400,20 @@ proc getRelation*(z: ZimFile): string = z.getMetadata("Relation")
 proc getSource*(z: ZimFile): string = z.getMetadata("Source")
 proc getCounter*(z: ZimFile): string = z.getMetadata("Counter")
 
-proc newZimFileReader*(filename: string): ZimFile =
+proc openZimFile*(filename: string): ZimFile =
   result.filename = filename
   result.stream = newFileStream(filename, fmRead)
   result.readHeader()
-  doAssert result.header.magicNumber == magicNumberZimFormat
   result.readMimeTypeList()
   result.readMetadata()
 
 proc startZimHttpServer*(filename: string, port: uint16 = 8080) = 
   
   const maxAge = 87840
-  let reader = newZimFileReader(filename)
-  let zimName = decodeUrl(reader.getName)
+  let zf = openZimFile(filename)
+  let zimName = decodeUrl(zf.getName)
   let zimNameLen = zimName.len
-  let urlMainpage = reader.mainPage.url
+  let urlMainpage = zf.mainPage.url
 
   proc redirectTo(req: Request, namespace: char, url: string) {.async.} =
     let headers = newHttpHeaders({
@@ -433,21 +431,21 @@ proc startZimHttpServer*(filename: string, port: uint16 = 8080) =
 
   proc responseOk(req: Request, entry: DirectoryEntry) {.async.} =
     let headers = newHttpHeaders({
-      "Content-Type": reader.contentType(entry),
+      "Content-Type": zf.contentType(entry),
       "Cache-Control": fmt"max-age={maxAge}, must-revalidate",
       "Connection": "Close"
     })
-    await req.respond(Http200, reader.readBlob(entry), headers)
+    await req.respond(Http200, zf.readBlob(entry), headers)
   
   proc handleRequest(req: Request) {.async.} =
     let path = req.url.path
-    when not defined(release):
-      echo path
     var decodedPath: string
     try: decodedPath = decodeUrl(path)
     except: decodedPath = path
+    when not defined(release):
+      echo decodedPath
     if unlikely(decodedPath == "/favicon.ico"):
-      await req.responseOk(reader.getFavicon)
+      await req.responseOk(zf.getFavicon)
     elif unlikely(
         decodedPath.len < zimNameLen + 5 or
         not decodedPath.startsWith('/' & zimName & '/') or
@@ -460,7 +458,7 @@ proc startZimHttpServer*(filename: string, port: uint16 = 8080) =
     else:
       let namespace = decodedPath[zimNameLen+2]
       var url = decodedPath[zimNameLen + 4..^1]
-      let r = reader.readDirectoryEntry(url, namespace)
+      let r = zf.readDirectoryEntry(url, namespace)
       if likely(r.success):
         await req.responseOk(r.entry)
       elif namespace != namespaceArticles:
@@ -470,13 +468,13 @@ proc startZimHttpServer*(filename: string, port: uint16 = 8080) =
         # We search for the best match and redirect because the filename is definetly different
         # to the filename that was requested.
         if not url.endsWith(".html"): url = url & ".html" # gives better results
-        let bestMatchResult = reader.readDirectoryEntry(url, namespaceArticles, true)
+        let bestMatchResult = zf.readDirectoryEntry(url, namespaceArticles, true)
         await req.redirectTo(namespace, bestMatchResult.entry.url)
 
   echo fmt"Serving ZIM file at http://localhost:{port}/{zimName}/{namespaceArticles}/{urlMainpage}"
-  echo reader.getTitle
-  echo reader.getDescription
-  echo reader.getDate
+  echo zf.getTitle
+  echo zf.getDescription
+  echo zf.getDate
   echo "Press CTRL-C to stop the server."
   let server = newAsyncHttpServer(maxBody = 0)
   waitFor server.serve(Port(port), handleRequest)
@@ -485,39 +483,38 @@ when isMainModule:
   import cligen
 
   proc checksum(filename: string) =
-    let reader = newZimFileReader(filename)
-    let zimName = decodeUrl(reader.getName)
-    echo fmt"Calculating MD5 checksum for `{zimName}`. Please wait."
-    let internal = reader.internalChecksum
-    let calculated = reader.calculatedChecksum
-    echo fmt"Internal checksum was: {internal}"
+    let zf = openZimFile(filename)
+    let zimName = decodeUrl(zf.getName)
+    echo &"Calculating MD5 checksum for ZIM file with name: {zimName}.\nPlease wait..."
+    let internal = zf.internalChecksum
+    let calculated = zf.calculatedChecksum
+    echo fmt"Internal checksum was:   {internal}"
     echo fmt"Calculated checksum was: {calculated}"
 
   proc metadata(filename: string) =
-    let reader = newZimFileReader(filename)
-    echo reader.metadata
+    let zf = openZimFile(filename)
+    echo zf.metadata
 
   proc printArticle(filename: string, articleName: string) =
-    let reader = newZimFileReader(filename)
-    let bestMatchResult = reader.readDirectoryEntry(articleName, namespaceArticles, true)
-    echo reader.readBlob(bestMatchResult.entry)
+    # TODO: implement search
+    let zf = openZimFile(filename)
+    var result = zf.binarySearchByUrl(if not articleName.endsWith(".html"): articleName & ".html" else: articleName, namespaceArticles)
+    if result.entry.isRedirect:
+      result.entry = zf.readDirectoryEntry(zf.urlPointerAtPos(result.entry.redirectIndex), true)
+    echo zf.readBlob(result.entry)
 
   proc randomArticle(filename: string) =
-    let reader = newZimFileReader(filename)
-    let randomResult = reader.randomArticleEntry()
-    echo reader.readBlob(randomResult)
+    let zf = openZimFile(filename)
+    let randomResult = zf.randomArticleEntry()
+    echo zf.readBlob(randomResult)
 
   proc mimetypes(filename: string) =
-    let reader = newZimFileReader(filename)
-    echo reader.mimetypeList
+    let zf = openZimFile(filename)
+    echo zf.mimetypeList
 
   proc debug(filename: string) =
-    let reader = newZimFileReader(filename)
-    echo fmt"""filename: {filename}
-filesize: {reader.filesize}
-internalChecksum: {reader.internalChecksum}
-header: {reader.header}
-metadata: {reader.metadata}"""
+    let zf = openZimFile(filename)
+    echo &"filename: {filename}\nfilesize: {zf.filesize}\ninternalChecksum: {zf.internalChecksum}\nheader: {zf.header}\nmetadata: {zf.metadata}"
 
 
   dispatchMulti(
