@@ -291,7 +291,7 @@ proc toMD5(s: Stream, length: Positive, blockSize: static[Positive]): MD5Digest 
 
 proc calculatedChecksum*(z: ZimFile): MD5Digest =
   z.stream.setPosition(0)
-  result = z.stream.toMD5(z.filesize-16, 2 shl 20)
+  result = z.stream.toMD5(z.filesize-16, 2 shl 26)
 
 proc matchesChecksum*(z: ZimFile): bool =
   z.internalChecksum == z.calculatedChecksum
